@@ -29,7 +29,7 @@ class LlmClient {
             LlmProvider.ANTHROPIC -> buildJsonObject {
                 put("model", settings.model)
                 put("max_tokens", 1200)
-                putJsonArray("system") { add(JsonPrimitive(system)) }
+                put("system", system)
                 putJsonArray("messages") { addJsonObject { put("role", "user"); put("content", description) } }
             }
         }

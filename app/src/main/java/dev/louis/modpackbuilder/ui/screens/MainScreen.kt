@@ -85,11 +85,11 @@ fun MainScreen(vm: MainViewModel, onSettings: () -> Unit) {
                 }
                 if (format == OutputFormat.ZIP) item {
                     Button(onClick = {
-                        pendingBytes = runCatching { vm.exporter.zipBytes(state.pack!!) }.getOrElse {
-                            null
+                        vm.exportZip(state.pack!!) { bytes ->
+                            pendingBytes = bytes
+                            zipSaver.launch("modpack.zip")
                         }
-                        if (pendingBytes != null) zipSaver.launch("modpack.zip")
-                    }, modifier = Modifier.fillMaxWidth()) { Text("Télécharger et enregistrer le ZIP") }
+                    }, enabled = !state.loading, modifier = Modifier.fillMaxWidth()) { Text("Télécharger et enregistrer le ZIP") }
                 }
                 items(state.mods) { mod ->
                     ElevatedCard(Modifier.fillMaxWidth()) {

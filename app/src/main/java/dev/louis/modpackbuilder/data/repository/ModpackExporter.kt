@@ -15,9 +15,15 @@ class ModpackExporter {
 
     fun indexBytes(pack: GeneratedModpack): ByteArray {
         val dependencies = mutableMapOf("minecraft" to pack.minecraftVersion)
-        dependencies["${pack.loader.apiName}-loader"] = pack.loaderVersion
+        val loaderKey = when (pack.loader) {
+            ModLoader.FABRIC -> "fabric-loader"
+            ModLoader.QUILT -> "quilt-loader"
+            ModLoader.FORGE -> "forge"
+            ModLoader.NEOFORGE -> "neoforge"
+        }
+        dependencies[loaderKey] = pack.loaderVersion
         val index = ModrinthIndex(
-            versionId = pack.minecraftVersion,
+            versionId = "1.0.0",
             name = pack.name,
             files = pack.mods.map {
                 IndexFile("mods/${it.fileName}", it.hashes, downloads = listOf(it.downloadUrl), fileSize = it.fileSize)

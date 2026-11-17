@@ -11,6 +11,8 @@ import dev.louis.modpackbuilder.domain.model.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 data class UiState(
     val loading: Boolean = false,
@@ -42,6 +44,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _state.value = _state.value.copy(loading = false, status = "Modpack prêt : ${pack.mods.size} mods.", mods = pack.mods, pack = pack)
             } catch (t: Throwable) {
                 _state.value = _state.value.copy(loading = false, error = t.message ?: "Erreur inconnue.")
+            }
+        }
+    }
+
+    fun exportZip(pack: GeneratedModpack, onReady: (ByteArray) -> Unit) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(loading = true, status = "Téléchargement des fichiers .jar…", error = null)
+            try {
+                val bytes = withContext(Dispatchers.IO) { exporter.zipBytes(pack) }
+                _state.value = _state.value.copy(loading = false, status = "Archive prête.")
+                onReady(bytes)
+            } catch (t: Throwable) {
+                _state.value = _state.value.copy(loading = false, error = t.message ?: "Échec de création du ZIP.")
             }
         }
     }
