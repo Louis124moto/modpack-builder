@@ -8,11 +8,46 @@ import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Interceptor
 import java.time.Instant
+import java.util.concurrent.TimeUnit
 
-class ModpackRepository {
+class ModpackRepository(
+    private val onDiagnostic: (String) -> Unit = {}
+) {
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .addInterceptor(Interceptor { chain ->
+            val request = chain.request()
+            val startedAt = System.nanoTime()
+            onDiagnostic("HTTP → ${request.method} ${request.url}")
+            try {
+                val response = chain.proceed(request)
+                val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+                if (response.isSuccessful) {
+                    onDiagnostic("HTTP ← ${response.code} ${response.message} (${elapsedMs} ms) — ${request.url}")
+                } else {
+                    val body = runCatching { response.peekBody(16 * 1024).string() }
+                        .getOrDefault("<corps de réponse illisible>")
+                    onDiagnostic(
+                        "HTTP ← ERREUR ${response.code} ${response.message} (${elapsedMs} ms) — ${request.url}" +
+                            if (body.isBlank()) "" else "\nCorps de réponse :\n$body"
+                    )
+                }
+                response
+            } catch (t: Throwable) {
+                val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+                onDiagnostic("HTTP ✕ ÉCHEC (${elapsedMs} ms) — ${request.method} ${request.url}\n${t.javaClass.name}: ${t.message}")
+                throw t
+            }
+        })
+        .build()
+
     private val api: ModrinthApi = Retrofit.Builder()
         .baseUrl("https://api.modrinth.com/v2/")
+        .client(httpClient)
         .addConverterFactory(Json { ignoreUnknownKeys = true }.asConverterFactory("application/json".toMediaType()))
         .build().create(ModrinthApi::class.java)
 

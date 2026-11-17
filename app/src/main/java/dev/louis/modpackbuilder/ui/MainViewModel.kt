@@ -14,6 +14,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import retrofit2.HttpException
+import java.io.PrintWriter
+import java.io.StringWriter
+import java.time.LocalTime
 
 data class UiState(
     val loading: Boolean = false,
@@ -27,27 +31,40 @@ data class UiState(
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val store = SettingsStore(app)
     private val llm = LlmClient()
-    private val repository = ModpackRepository()
+    private val repository = ModpackRepository(::addLog)
     val exporter = ModpackExporter()
     private val _state = MutableStateFlow(UiState())
     val state = _state.asStateFlow()
     private val _logs = MutableStateFlow<List<String>>(emptyList())
     val logs = _logs.asStateFlow()
 
+    private fun timestamp(): String = LocalTime.now().withNano(0).toString()
+
     private fun addLog(message: String) {
-        val entry = "${java.time.LocalTime.now().withNano(0)}  $message"
-        _logs.value = (_logs.value + entry).takeLast(150)
+        val entry = "${timestamp()}  $message"
+        _logs.value = (_logs.value + entry).takeLast(MAX_LOG_ENTRIES)
         Log.i(TAG, message)
     }
 
     private fun addErrorLog(message: String, error: Throwable) {
         val details = generateSequence(error) { it.cause }
-            .take(8)
-            .joinToString(" <- ") { cause ->
-                "${cause.javaClass.simpleName}: ${cause.message ?: "aucun détail"}"
+            .take(12)
+            .joinToString("\n") { cause ->
+                "${cause.javaClass.name}: ${cause.message ?: "aucun détail"}"
             }
-        val entry = "${java.time.LocalTime.now().withNano(0)}  ERREUR — $message — $details"
-        _logs.value = (_logs.value + entry).takeLast(150)
+        val httpDetails = (error as? HttpException)?.let { http ->
+            buildString {
+                append("\nHTTP ${http.code()} ${http.message()}")
+                append("\nURL : ${http.response()?.raw()?.request?.url}")
+                val body = runCatching { http.response()?.errorBody()?.string() }.getOrNull()
+                if (!body.isNullOrBlank()) append("\nCorps de réponse :\n").append(body.take(MAX_ERROR_BODY_CHARS))
+            }
+        }.orEmpty()
+        val stack = StringWriter().also { writer ->
+            error.printStackTrace(PrintWriter(writer))
+        }.toString()
+        val entry = "${timestamp()}  ERREUR — $message\n$details$httpDetails\nPile d'appels complète :\n$stack"
+        _logs.value = (_logs.value + entry).takeLast(MAX_LOG_ENTRIES)
         Log.e(TAG, message, error)
     }
 
@@ -101,6 +118,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _state.value = _state.value.copy(loading = false, status = "Archive prête.")
                 onReady(bytes)
             } catch (t: Throwable) {
+                addErrorLog("Échec de l'export ZIP", t)
                 _state.value = _state.value.copy(loading = false, error = t.message ?: "Échec de création du ZIP.")
             }
         }
@@ -118,5 +136,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val TAG = "ModpackBuilder"
+        private const val MAX_LOG_ENTRIES = 1000
+        private const val MAX_ERROR_BODY_CHARS = 16_000
     }
 }

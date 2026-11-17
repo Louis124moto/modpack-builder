@@ -6,6 +6,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.louis.modpackbuilder.data.local.*
@@ -20,6 +22,13 @@ fun SettingsScreen(
 ) {
     var settings by remember { mutableStateOf(store.read()) }
     var expanded by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val logScrollState = rememberScrollState()
+
+    LaunchedEffect(logs.size) {
+        if (logs.isNotEmpty()) logScrollState.animateScrollTo(logScrollState.maxValue)
+    }
+
     Scaffold(topBar = { TopAppBar(title = { Text("Configuration") }, navigationIcon = {
         TextButton(onClick = onBack) { Text("Retour") }
     }, actions = { TextButton(onClick = { store.save(settings); onBack() }) { Text("Enregistrer") } }) }) { padding ->
@@ -78,31 +87,40 @@ fun SettingsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text("Journal de diagnostic", style = MaterialTheme.typography.titleMedium)
-                TextButton(onClick = onClearLogs, enabled = logs.isNotEmpty()) { Text("Effacer") }
+                Row {
+                    TextButton(
+                        onClick = { clipboard.setText(AnnotatedString(logs.joinToString("\n\n"))) },
+                        enabled = logs.isNotEmpty()
+                    ) { Text("Tout copier") }
+                    TextButton(onClick = onClearLogs, enabled = logs.isNotEmpty()) { Text("Effacer") }
+                }
             }
             Text(
-                "Les événements Gemini et Modrinth apparaissent ici. Aucune clé API n'est enregistrée.",
+                "Journal détaillé des requêtes réseau : méthode, URL, code HTTP, durée et corps des réponses en erreur. Les clés API et les en-têtes d'authentification ne sont pas journalisés. Les derniers événements restent disponibles en mémoire.",
                 style = MaterialTheme.typography.bodySmall
             )
+            Text("${logs.size} événement(s) — les plus récents sont en bas", style = MaterialTheme.typography.labelSmall)
             if (logs.isEmpty()) {
                 Text("Aucun événement pour le moment.", style = MaterialTheme.typography.bodyMedium)
             } else {
                 Surface(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 340.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = MaterialTheme.shapes.medium
                 ) {
                     Column(
-                        Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        Modifier.fillMaxWidth().verticalScroll(logScrollState).padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        logs.asReversed().forEach { entry ->
+                        logs.forEach { entry ->
                             Text(
                                 entry,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (entry.contains("ERREUR")) MaterialTheme.colorScheme.error
-                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (entry.contains("ERREUR") || entry.contains("HTTP ← ERREUR") || entry.contains("HTTP ✕"))
+                                    MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     }
                 }
