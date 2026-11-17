@@ -12,7 +12,12 @@ import dev.louis.modpackbuilder.data.local.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(store: SettingsStore, onBack: () -> Unit) {
+fun SettingsScreen(
+    store: SettingsStore,
+    logs: List<String>,
+    onClearLogs: () -> Unit,
+    onBack: () -> Unit
+) {
     var settings by remember { mutableStateOf(store.read()) }
     var expanded by remember { mutableStateOf(false) }
     Scaffold(topBar = { TopAppBar(title = { Text("Configuration") }, navigationIcon = {
@@ -67,6 +72,41 @@ fun SettingsScreen(store: SettingsStore, onBack: () -> Unit) {
                 "La clé est conservée localement dans des préférences chiffrées avec Android Keystore. Elle n'est jamais envoyée à Modrinth.",
                 style = MaterialTheme.typography.bodySmall
             )
+            HorizontalDivider()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Journal de diagnostic", style = MaterialTheme.typography.titleMedium)
+                TextButton(onClick = onClearLogs, enabled = logs.isNotEmpty()) { Text("Effacer") }
+            }
+            Text(
+                "Les événements Gemini et Modrinth apparaissent ici. Aucune clé API n'est enregistrée.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            if (logs.isEmpty()) {
+                Text("Aucun événement pour le moment.", style = MaterialTheme.typography.bodyMedium)
+            } else {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Column(
+                        Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        logs.asReversed().forEach { entry ->
+                            Text(
+                                entry,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (entry.contains("ERREUR")) MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

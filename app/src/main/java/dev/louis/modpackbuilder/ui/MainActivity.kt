@@ -18,7 +18,12 @@ class MainActivity : ComponentActivity() {
             var showSettings by remember { mutableStateOf(false) }
             MaterialTheme {
                 Surface {
-                    if (showSettings) SettingsScreen(vm.settingsStore()) { showSettings = false }
+                    if (showSettings) SettingsScreen(
+                        store = vm.settingsStore(),
+                        logs = vm.logs.collectAsState().value,
+                        onClearLogs = { vm.clearLogs() },
+                        onBack = { showSettings = false }
+                    )
                     else MainScreen(vm) { showSettings = true }
                 }
             }

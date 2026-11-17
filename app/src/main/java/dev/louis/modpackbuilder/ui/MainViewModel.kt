@@ -31,6 +31,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val exporter = ModpackExporter()
     private val _state = MutableStateFlow(UiState())
     val state = _state.asStateFlow()
+    private val _logs = MutableStateFlow<List<String>>(emptyList())
+    val logs = _logs.asStateFlow()
+
+    private fun addLog(message: String) {
+        val entry = "${java.time.LocalTime.now().withNano(0)}  $message"
+        _logs.value = (_logs.value + entry).takeLast(150)
+        Log.i(TAG, message)
+    }
+
+    private fun addErrorLog(message: String, error: Throwable) {
+        val details = generateSequence(error) { it.cause }
+            .take(8)
+            .joinToString(" <- ") { cause ->
+                "${cause.javaClass.simpleName}: ${cause.message ?: "aucun détail"}"
+            }
+        val entry = "${java.time.LocalTime.now().withNano(0)}  ERREUR — $message — $details"
+        _logs.value = (_logs.value + entry).takeLast(150)
+        Log.e(TAG, message, error)
+    }
 
     fun generate(description: String, loader: ModLoader, automatic: Boolean, version: String, format: OutputFormat) {
         if (description.isBlank()) { _state.value = _state.value.copy(error = "Décris le modpack souhaité."); return }
@@ -41,34 +60,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val settings = store.read()
                 phase = "fournisseur IA"
-                Log.i(TAG, "Génération démarrée : provider=${settings.provider}, model=${settings.model}")
-                Log.i(TAG, "Étape 1/2 : requête au fournisseur IA")
+                addLog("Génération démarrée — fournisseur : ${settings.provider}, modèle : ${settings.model}")
+                addLog("Étape 1/2 — connexion au fournisseur IA")
                 val names = try {
                     llm.identifyMods(description, settings)
                 } catch (t: Throwable) {
-                    Log.e(TAG, "Échec pendant la requête au fournisseur IA", t)
+                    addErrorLog("Échec de la requête au fournisseur IA", t)
                     throw IllegalStateException(
                         "Échec de connexion au fournisseur IA (${settings.provider}, modèle ${settings.model}) : ${rootCauseMessage(t)}",
                         t
                     )
                 }
-                Log.i(TAG, "Étape 1/2 terminée : ${names.size} noms de mods reçus")
+                addLog("Étape 1/2 terminée — ${names.size} mods identifiés")
                 phase = "Modrinth"
                 _state.value = _state.value.copy(status = "Recherche des mods et dépendances sur Modrinth…")
-                Log.i(TAG, "Étape 2/2 : résolution de ${names.size} mods sur Modrinth")
+                addLog("Étape 2/2 — recherche de ${names.size} mods sur Modrinth")
                 val pack = try {
                     repository.resolve(names, ModpackRequest(description, loader, automatic, if (automatic) null else version, format))
                 } catch (t: Throwable) {
-                    Log.e(TAG, "Échec pendant la résolution Modrinth", t)
+                    addErrorLog("Échec de la résolution Modrinth", t)
                     throw IllegalStateException(
                         "Échec de connexion ou de résolution sur Modrinth : ${rootCauseMessage(t)}",
                         t
                     )
                 }
-                Log.i(TAG, "Génération terminée : ${pack.mods.size} mods résolus")
+                addLog("Génération terminée — ${pack.mods.size} mods résolus")
                 _state.value = _state.value.copy(loading = false, status = "Modpack prêt : ${pack.mods.size} mods.", mods = pack.mods, pack = pack)
             } catch (t: Throwable) {
-                Log.e(TAG, "Génération échouée pendant l'étape : $phase", t)
+                addErrorLog("Génération échouée pendant l'étape : $phase", t)
                 _state.value = _state.value.copy(loading = false, error = t.message ?: "Erreur inconnue.")
             }
         }
@@ -88,6 +107,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearError() { _state.value = _state.value.copy(error = null) }
+    fun clearLogs() { _logs.value = emptyList() }
     fun settingsStore() = store
 
     private fun rootCauseMessage(error: Throwable): String {
