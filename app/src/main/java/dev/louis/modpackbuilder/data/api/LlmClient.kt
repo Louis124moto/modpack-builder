@@ -1,5 +1,7 @@
 package dev.louis.modpackbuilder.data.api
 
+import android.util.Log
+
 import dev.louis.modpackbuilder.data.local.AppSettings
 import dev.louis.modpackbuilder.data.local.LlmProvider
 import kotlinx.serialization.json.*
@@ -53,6 +55,7 @@ class LlmClient {
             LlmProvider.ANTHROPIC -> "https://api.anthropic.com/v1/messages"
             LlmProvider.GEMINI -> "https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent"
         }
+        Log.i(TAG, "Requête IA : provider=${settings.provider}, model=${settings.model}, endpoint=${url.substringBefore("/v1beta/") .ifBlank { url.substringBefore("/v1/") }}")
         val request = Request.Builder().url(url)
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .header("Content-Type", "application/json")
@@ -67,10 +70,19 @@ class LlmClient {
                 }
             }.build()
         val response = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            http.newCall(request).execute().use { res ->
-                val text = res.body?.string().orEmpty()
-                if (!res.isSuccessful) error("Erreur LLM HTTP ${res.code}: ${text.take(500)}")
-                text
+            try {
+                http.newCall(request).execute().use { res ->
+                    val text = res.body?.string().orEmpty()
+                    Log.i(TAG, "Réponse IA reçue : HTTP ${res.code}")
+                    if (!res.isSuccessful) {
+                        Log.e(TAG, "Le fournisseur IA a retourné HTTP ${res.code}")
+                        error("Erreur LLM HTTP ${res.code}: ${text.take(500)}")
+                    }
+                    text
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "Échec réseau/API pendant l'appel au fournisseur IA", t)
+                throw t
             }
         }
         val root = json.parseToJsonElement(response).jsonObject
@@ -88,7 +100,13 @@ class LlmClient {
         } ?: error("Réponse LLM vide ou inattendue.")
         val cleaned = content.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
         val array = json.parseToJsonElement(cleaned).jsonArray
-        return array.mapNotNull { it.jsonPrimitive.contentOrNull?.trim() }
+        val mods = array.mapNotNull { it.jsonPrimitive.contentOrNull?.trim() }
             .filter { it.isNotBlank() }.distinct().take(30)
+        Log.i(TAG, "Réponse IA analysée : ${mods.size} noms de mods")
+        return mods
+    }
+
+    companion object {
+        private const val TAG = "ModpackBuilder"
     }
 }

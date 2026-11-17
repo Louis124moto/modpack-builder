@@ -1,6 +1,7 @@
 package dev.louis.modpackbuilder.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.louis.modpackbuilder.data.api.LlmClient
@@ -36,13 +37,38 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (!automatic && version.isBlank()) { _state.value = _state.value.copy(error = "Saisis une version Minecraft."); return }
         viewModelScope.launch {
             _state.value = UiState(loading = true, status = "Analyse de la demande…", outputFormat = format)
+            var phase = "initialisation"
             try {
                 val settings = store.read()
-                val names = llm.identifyMods(description, settings)
+                phase = "fournisseur IA"
+                Log.i(TAG, "Génération démarrée : provider=${settings.provider}, model=${settings.model}")
+                Log.i(TAG, "Étape 1/2 : requête au fournisseur IA")
+                val names = try {
+                    llm.identifyMods(description, settings)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Échec pendant la requête au fournisseur IA", t)
+                    throw IllegalStateException(
+                        "Échec de connexion au fournisseur IA (${settings.provider}, modèle ${settings.model}) : ${rootCauseMessage(t)}",
+                        t
+                    )
+                }
+                Log.i(TAG, "Étape 1/2 terminée : ${names.size} noms de mods reçus")
+                phase = "Modrinth"
                 _state.value = _state.value.copy(status = "Recherche des mods et dépendances sur Modrinth…")
-                val pack = repository.resolve(names, ModpackRequest(description, loader, automatic, if (automatic) null else version, format))
+                Log.i(TAG, "Étape 2/2 : résolution de ${names.size} mods sur Modrinth")
+                val pack = try {
+                    repository.resolve(names, ModpackRequest(description, loader, automatic, if (automatic) null else version, format))
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Échec pendant la résolution Modrinth", t)
+                    throw IllegalStateException(
+                        "Échec de connexion ou de résolution sur Modrinth : ${rootCauseMessage(t)}",
+                        t
+                    )
+                }
+                Log.i(TAG, "Génération terminée : ${pack.mods.size} mods résolus")
                 _state.value = _state.value.copy(loading = false, status = "Modpack prêt : ${pack.mods.size} mods.", mods = pack.mods, pack = pack)
             } catch (t: Throwable) {
+                Log.e(TAG, "Génération échouée pendant l'étape : $phase", t)
                 _state.value = _state.value.copy(loading = false, error = t.message ?: "Erreur inconnue.")
             }
         }
@@ -63,4 +89,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearError() { _state.value = _state.value.copy(error = null) }
     fun settingsStore() = store
+
+    private fun rootCauseMessage(error: Throwable): String {
+        var cause = error
+        while (cause.cause != null && cause.cause !== cause) cause = cause.cause!!
+        return cause.message ?: cause.javaClass.simpleName
+    }
+
+    companion object {
+        private const val TAG = "ModpackBuilder"
+    }
 }
