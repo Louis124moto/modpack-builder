@@ -4,12 +4,13 @@ import dev.louis.modpackbuilder.data.api.*
 import dev.louis.modpackbuilder.domain.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import retrofit2.Retrofit
-import retrofit2.converter.kotlinx.serialization.asConverterFactory
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Interceptor
+import okhttp3.Request
+import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 
@@ -86,10 +87,9 @@ class ModpackRepository(
 
         require(resolved.isNotEmpty()) { "Aucun mod compatible trouvé sur Modrinth." }
         val minecraft = request.minecraftVersion ?: chooseMinecraftVersion(selectedVersions.values.toList())
-        val loaderVersion = api.loaderVersions(request.loader.apiName)
-            .filter { it.stable }.maxByOrNull { it.version }?.version
-            ?: api.loaderVersions(request.loader.apiName).firstOrNull()?.version
-            ?: error("Impossible de déterminer la version du loader ${request.loader.apiName}.")
+        onDiagnostic("Résolution de la version ${request.loader.apiName} pour Minecraft $minecraft")
+        val loaderVersion = resolveLoaderVersion(request.loader, minecraft)
+        onDiagnostic("Version du loader obtenue : ${request.loader.apiName} $loaderVersion")
         GeneratedModpack(
             name = request.description.take(48).ifBlank { "Modpack généré" },
             minecraftVersion = minecraft,
@@ -97,6 +97,67 @@ class ModpackRepository(
             loaderVersion = loaderVersion,
             mods = resolved.values.toList()
         )
+    }
+
+    private fun resolveLoaderVersion(loader: ModLoader, minecraftVersion: String): String {
+        val url = when (loader) {
+            ModLoader.FABRIC -> "https://meta.fabricmc.net/v2/versions/loader/$minecraftVersion"
+            ModLoader.QUILT -> "https://meta.quiltmc.org/v3/versions/loader/$minecraftVersion"
+            ModLoader.FORGE -> "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json"
+            ModLoader.NEOFORGE -> "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml"
+        }
+        val request = Request.Builder().url(url).get().build()
+        val body = httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                error("Impossible de récupérer les versions de ${loader.apiName} : HTTP ${response.code} ($url)")
+            }
+            response.body?.string() ?: error("Réponse vide du service de versions de ${loader.apiName} ($url)")
+        }
+
+        return when (loader) {
+            ModLoader.FABRIC, ModLoader.QUILT -> {
+                val entries = Json.parseToJsonElement(body).jsonArray
+                val versions = entries.mapNotNull { entry ->
+                    val loaderInfo = entry.jsonObject["loader"]?.jsonObject ?: return@mapNotNull null
+                    val version = loaderInfo["version"]?.jsonPrimitive?.contentOrNull
+                        ?: return@mapNotNull null
+                    val stable = loaderInfo["stable"]?.jsonPrimitive?.booleanOrNull ?: true
+                    version to stable
+                }
+                versions.firstOrNull { it.second }?.first
+                    ?: versions.firstOrNull()?.first
+                    ?: error("Aucune version de ${loader.apiName} compatible avec Minecraft $minecraftVersion.")
+            }
+            ModLoader.FORGE -> {
+                val promotions = Json.parseToJsonElement(body).jsonObject["promos"]?.jsonObject
+                    ?: error("Format inattendu des promotions Forge.")
+                promotions["$minecraftVersion-recommended"]?.jsonPrimitive?.contentOrNull
+                    ?: promotions["$minecraftVersion-latest"]?.jsonPrimitive?.contentOrNull
+                    ?: error("Aucune version Forge publiée pour Minecraft $minecraftVersion.")
+            }
+            ModLoader.NEOFORGE -> {
+                val prefix = if (minecraftVersion == "1.20.1") "47.1."
+                    else minecraftVersion.removePrefix("1.") + "."
+                val versions = Regex("<version>([^<]+)</version>")
+                    .findAll(body)
+                    .map { it.groupValues[1] }
+                    .filter { it.startsWith(prefix) }
+                    .toList()
+                versions.maxWithOrNull(::compareVersionNumbers)
+                    ?: error("Aucune version NeoForge trouvée pour Minecraft $minecraftVersion (préfixe attendu : $prefix).")
+            }
+        }
+    }
+
+    private fun compareVersionNumbers(left: String, right: String): Int {
+        val leftParts = Regex("\\d+").findAll(left).map { it.value.toLong() }.toList()
+        val rightParts = Regex("\\d+").findAll(right).map { it.value.toLong() }.toList()
+        for (index in 0 until maxOf(leftParts.size, rightParts.size)) {
+            val comparison = (leftParts.getOrNull(index) ?: 0L)
+                .compareTo(rightParts.getOrNull(index) ?: 0L)
+            if (comparison != 0) return comparison
+        }
+        return 0
     }
 
     private fun chooseVersion(versions: List<ModVersion>): ModVersion? {

@@ -1,6 +1,5 @@
 package dev.louis.modpackbuilder.data.api
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import retrofit2.http.GET
 import retrofit2.http.Path
@@ -39,7 +38,6 @@ import retrofit2.http.Query
     val project_id: String? = null,
     val dependency_type: String = "required"
 )
-@Serializable data class LoaderVersion(val version: String, val stable: Boolean = false)
 
 interface ModrinthApi {
     @GET("search") suspend fun searchProjects(
@@ -55,6 +53,4 @@ interface ModrinthApi {
     ): List<ModVersion>
 
     @GET("version/{id}") suspend fun version(@Path("id") versionId: String): ModVersion
-
-    @GET("tag/loader/{loader}") suspend fun loaderVersions(@Path("loader") loader: String): List<LoaderVersion>
 }
