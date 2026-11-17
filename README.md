@@ -5,7 +5,8 @@ Native Android app (Kotlin + Jetpack Compose) that turns a natural-language Mine
 ## Current implementation
 
 - Compose UI for a prompt, Fabric / Forge / NeoForge / Quilt, automatic or manual Minecraft version, and three output formats.
-- Settings screen for an OpenAI-compatible endpoint or Anthropic, model, and API key.
+- LLM providers: OpenAI-compatible APIs, Anthropic, and Google Gemini.
+- Gemini uses Google's native `generateContent` API; the default model is `gemini-2.5-flash`.
 - API key stored in AndroidX EncryptedSharedPreferences (Android Keystore-backed).
 - LLM prompt asks for a JSON array of mod project names.
 - Modrinth v2 search, loader/version filtering, stable-version preference, common Minecraft version selection in automatic mode, and recursive required dependency resolution.
@@ -26,10 +27,11 @@ The CI workflow installs the Android SDK and runs the same build. The APK is upl
 
 1. Install the debug APK.
 2. Open the gear icon.
-3. Select the provider, enter its API key and model, and save.
-4. For OpenAI-compatible services, set the API base URL ending in /v1 (the app appends /chat/completions).
+3. Select Google Gemini, enter a Gemini API key and model (default: `gemini-2.5-flash`), then save.
+4. Create a Gemini API key in Google AI Studio: https://aistudio.google.com/app/apikey
+5. OpenAI-compatible services can use a custom API base URL ending in `/v1`.
 
-The app sends the prompt to the configured LLM provider and queries the public Modrinth API. API keys are not sent to Modrinth and must never be committed to this repository.
+The app sends the prompt to the configured LLM provider and queries the public Modrinth API. API keys are stored encrypted on-device, are not sent to Modrinth, and must never be committed to this repository.
 
 ## Notes / known limitations
 
@@ -37,7 +39,7 @@ The app sends the prompt to the configured LLM provider and queries the public M
 - Automatic mode requires a common Minecraft version across the LLM-selected root mods. If none exists, choose a version manually.
 - ZIP generation downloads the selected JAR files on-device. Large packs require sufficient free storage.
 - Modrinth index metadata uses the selected Minecraft and loader versions. The generated index is intended for Prism Launcher; validate the resulting pack in the launcher before sharing it.
-- This is an initial implementation. It has not yet been verified by a successful Android CI build.
+- This is an initial implementation. A successful CI build verifies compilation, but does not replace testing on a physical Android device.
 
 ## License
 

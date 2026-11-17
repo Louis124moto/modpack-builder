@@ -32,19 +32,39 @@ class LlmClient {
                 put("system", system)
                 putJsonArray("messages") { addJsonObject { put("role", "user"); put("content", description) } }
             }
+            LlmProvider.GEMINI -> buildJsonObject {
+                putJsonObject("systemInstruction") {
+                    putJsonArray("parts") { addJsonObject { put("text", system) } }
+                }
+                putJsonArray("contents") {
+                    addJsonObject {
+                        put("role", "user")
+                        putJsonArray("parts") { addJsonObject { put("text", description) } }
+                    }
+                }
+                putJsonObject("generationConfig") {
+                    put("temperature", 0.1)
+                    put("responseMimeType", "application/json")
+                }
+            }
         }
         val url = when (settings.provider) {
             LlmProvider.OPENAI_COMPATIBLE -> settings.baseUrl.trimEnd('/') + "/chat/completions"
             LlmProvider.ANTHROPIC -> "https://api.anthropic.com/v1/messages"
+            LlmProvider.GEMINI -> "https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent"
         }
         val request = Request.Builder().url(url)
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .header("Content-Type", "application/json")
             .apply {
-                if (settings.provider == LlmProvider.ANTHROPIC) {
-                    header("x-api-key", settings.apiKey)
-                    header("anthropic-version", "2023-06-01")
-                } else header("Authorization", "Bearer ${settings.apiKey}")
+                when (settings.provider) {
+                    LlmProvider.ANTHROPIC -> {
+                        header("x-api-key", settings.apiKey)
+                        header("anthropic-version", "2023-06-01")
+                    }
+                    LlmProvider.GEMINI -> header("x-goog-api-key", settings.apiKey)
+                    LlmProvider.OPENAI_COMPATIBLE -> header("Authorization", "Bearer ${settings.apiKey}")
+                }
             }.build()
         val response = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             http.newCall(request).execute().use { res ->
@@ -54,10 +74,17 @@ class LlmClient {
             }
         }
         val root = json.parseToJsonElement(response).jsonObject
-        val content = if (settings.provider == LlmProvider.ANTHROPIC) {
-            root["content"]?.jsonArray?.firstOrNull()?.jsonObject?.get("text")?.jsonPrimitive?.content
-        } else {
-            root["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content
+        val content = when (settings.provider) {
+            LlmProvider.ANTHROPIC ->
+                root["content"]?.jsonArray?.firstOrNull()?.jsonObject?.get("text")?.jsonPrimitive?.content
+            LlmProvider.GEMINI ->
+                root["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
+                    ?.get("content")?.jsonObject?.get("parts")?.jsonArray
+                    ?.mapNotNull { part -> part.jsonObject["text"]?.jsonPrimitive?.contentOrNull }
+                    ?.joinToString("")
+            LlmProvider.OPENAI_COMPATIBLE ->
+                root["choices"]?.jsonArray?.firstOrNull()?.jsonObject
+                    ?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content
         } ?: error("Réponse LLM vide ou inattendue.")
         val cleaned = content.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
         val array = json.parseToJsonElement(cleaned).jsonArray

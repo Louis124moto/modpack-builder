@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
-enum class LlmProvider { OPENAI_COMPATIBLE, ANTHROPIC }
+enum class LlmProvider { OPENAI_COMPATIBLE, ANTHROPIC, GEMINI }
 
 data class AppSettings(
     val apiKey: String = "",
